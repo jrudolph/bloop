@@ -27,6 +27,7 @@ import monix.execution.cancelables.CompositeCancelable
 import scala.concurrent.Future
 import scala.concurrent.Promise
 import scala.meta.jsonrpc.{BaseProtocolMessage, LanguageClient, LanguageServer}
+import java.nio.file.NoSuchFileException
 
 object BspServer {
   private implicit val logContext: DebugFilter = DebugFilter.Bsp
@@ -245,9 +246,14 @@ object BspServer {
     val deleteExternalDirsTask = latestState.build.projects.map { project =>
       import bloop.io.Paths
       import java.io.IOException
-      val externalClientClassesDir = latestState.client.getUniqueClassesDirFor(project)
-      if (externalClientClassesDir == project.genericClassesDir) Task.now(())
-      else Task.eval(Paths.delete(externalClientClassesDir)).executeWithFork
+      try {
+        val externalClientClassesDir = latestState.client.getUniqueClassesDirFor(project)
+        if (externalClientClassesDir == project.genericClassesDir) Task.now(())
+        else Task.fork(Task.eval(Paths.delete(externalClientClassesDir)))
+      } catch {
+        // Can be thrown from `getUniqueClassesDirFor`
+        case _: NoSuchFileException => Task.now(())
+      }
     }
 
     // Close any socket communication asap and swallow exceptions
