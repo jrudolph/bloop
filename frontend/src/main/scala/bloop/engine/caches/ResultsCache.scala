@@ -26,6 +26,7 @@ import xsbti.compile.{CompileAnalysis, MiniSetup, PreviousResult}
 import scala.concurrent.Await
 import scala.concurrent.duration.Duration
 import bloop.UniqueCompileInputs
+import bloop.CompileOutPaths
 
 /**
  * Maps projects to compilation results, populated by `Tasks.compile`.
@@ -106,13 +107,39 @@ object ResultsCache {
   private[bloop] val emptyForTests: ResultsCache =
     new ResultsCache(Map.empty, Map.empty)
 
-  def load(build: Build, cwd: AbsolutePath, logger: Logger): ResultsCache = {
-    val handle = loadAsync(build, cwd, logger).runAsync(ExecutionContext.ioScheduler)
-    Await.result(handle, Duration.Inf)
+  def load(
+      build: Build,
+      cwd: AbsolutePath,
+      cleanOrphanedInternalDirs: Boolean,
+      logger: Logger
+  ): ResultsCache = {
+    val handle = loadAsync(build, cwd, cleanOrphanedInternalDirs, logger)
+    Await.result(handle.runAsync(ExecutionContext.ioScheduler), Duration.Inf)
   }
 
-  def loadAsync(build: Build, cwd: AbsolutePath, logger: Logger): Task[ResultsCache] = {
+  def loadAsync(
+      build: Build,
+      cwd: AbsolutePath,
+      cleanOrphanedInternalDirs: Boolean,
+      logger: Logger
+  ): Task[ResultsCache] = {
     import bloop.util.JavaCompat.EnrichOptional
+
+    def cleanUpOrphanedInternalDirs(
+        project: Project,
+        analysisClassesDir: AbsolutePath
+    ): Task[Unit] = {
+      if (cleanUpOrphanedInternalDirs) Task.unit
+      else {
+        val internalClassesDir = CompileOutPaths.createInternalClassesDir(project.genericClassesDir)
+        // This is a surprise, skip any cleanup if this invariant doesn't hold
+        if (internalClassesDir != analysisClassesDir.getParent) Task.unit
+        else {
+          internalClassesDir
+
+        }
+      }
+    }
 
     def fetchPreviousResult(p: Project): Task[ResultBundle] = {
       val analysisFile = p.analysisOut
